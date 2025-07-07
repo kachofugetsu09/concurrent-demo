@@ -3,6 +3,8 @@ package site.hnfy258.demo1;
 import site.hnfy258.demo2.ConfigUpdater;
 import site.hnfy258.demo2.DynamicProcessingConfig;
 import site.hnfy258.demo2.EventMetrics;
+import site.hnfy258.demo3.EventProcessorService;
+import site.hnfy258.demo3.MockExternalService;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -35,6 +37,18 @@ public class PipelineLauncher {
         ConfigUpdater configUpdater = new ConfigUpdater(config);
         configUpdaterExecutor.submit(configUpdater);
 
+        MockExternalService service = new MockExternalService();
+        EventProcessorService processorService = new EventProcessorService(service);
+
+
+
+
+
+
+
+
+
+
         System.out.println("Starting producers...");
         for(int i=0;i<PRODUCER_COUNT;i++){
             EventProducer  producer = new EventProducer(eventBufferQueue,EVENT_PER_CONSUMER);
@@ -48,7 +62,7 @@ public class PipelineLauncher {
 
 
         for (int i = 0; i < CONSUMER_COUNT; i++) {
-            EventConsumer consumer = new EventConsumer(eventBufferQueue,eventMetrics,config);
+            EventConsumer consumer = new EventConsumer(eventBufferQueue,eventMetrics,config,processorService);
             consumers.add(consumer);
             consumerFutures.add(consumersExecutor.submit(consumer));
         }
@@ -124,15 +138,12 @@ public class PipelineLauncher {
         System.out.println("Total produced successfully: " + totalProducedSuccessFully);
         System.out.println("Total produced failed: " + totalProducedFailed);
 
-        long totalConsumedLocal =0; // 本地统计
-        for(EventConsumer consumer: consumers){
-            totalConsumedLocal += consumer.getSuccessCount();
-        }
-        System.out.println("Total consumed (local): " + totalConsumedLocal);
 
         eventMetrics.printMetrics(); // 打印 EventMetrics 中的统计数据
         System.out.println("Events remaining in queue: " + eventBufferQueue.size());
 
         config.printConfig(); // 打印最终配置状态
+
+        service.shutdownExecutors();
     }
 }
