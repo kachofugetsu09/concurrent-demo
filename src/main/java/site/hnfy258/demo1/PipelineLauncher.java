@@ -1,11 +1,13 @@
 package site.hnfy258.demo1;
 
+import site.hnfy258.demo2.ConfigUpdater;
+import site.hnfy258.demo2.DynamicProcessingConfig;
+import site.hnfy258.demo2.EventMetrics;
+
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class PipelineLauncher {
     public static void main(String[] args) {
@@ -17,6 +19,21 @@ public class PipelineLauncher {
         ExecutorService producerExecutor = Executors.newFixedThreadPool(PRODUCER_COUNT);
         List<Future<?>> producersFutures = new ArrayList<>();
         List<EventProducer> producers = new ArrayList<>();
+
+        EventMetrics eventMetrics = new EventMetrics(new ConcurrentHashMap<>());
+
+        DynamicProcessingConfig config = new DynamicProcessingConfig();
+        ExecutorService configUpdaterExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r);
+                t.setName("ConfigUpdaterThread");
+
+                return t;
+            }
+        });
+        ConfigUpdater configUpdater = new ConfigUpdater(config);
+        configUpdaterExecutor.submit(configUpdater);
 
         System.out.println("Starting producers...");
         for(int i=0;i<PRODUCER_COUNT;i++){
@@ -31,7 +48,7 @@ public class PipelineLauncher {
 
 
         for (int i = 0; i < CONSUMER_COUNT; i++) {
-            EventConsumer consumer = new EventConsumer(eventBufferQueue);
+            EventConsumer consumer = new EventConsumer(eventBufferQueue,eventMetrics,config);
             consumers.add(consumer);
             consumerFutures.add(consumersExecutor.submit(consumer));
         }
@@ -72,6 +89,28 @@ public class PipelineLauncher {
             System.err.println("Consumers await termination interrupted: " + e.getMessage());
         }
 
+        configUpdaterExecutor.shutdown();
+        System.out.println("ConfigUpdater started shutdown. Waiting for config updates to finish...");
+
+        try {
+            if (!configUpdaterExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                // 如果优雅关闭超时，强制中断
+                configUpdaterExecutor.shutdownNow();
+                System.out.println("ConfigUpdater did not terminate gracefully, forcing shutdown.");
+
+                // 再等待一点时间确保中断处理完成
+                if (!configUpdaterExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    System.err.println("ConfigUpdater did not terminate even after forced shutdown.");
+                }
+            } else {
+                System.out.println("ConfigUpdater finished gracefully");
+            }
+        } catch (InterruptedException e) {
+            configUpdaterExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+            System.err.println("ConfigUpdater await termination interrupted: " + e.getMessage());
+        }
+
 
         System.out.println("FINISH");
         long totalProducedSuccessFully = 0;
@@ -85,16 +124,15 @@ public class PipelineLauncher {
         System.out.println("Total produced successfully: " + totalProducedSuccessFully);
         System.out.println("Total produced failed: " + totalProducedFailed);
 
-        long totalConsumed =0;
+        long totalConsumedLocal =0; // 本地统计
         for(EventConsumer consumer: consumers){
-            totalConsumed += consumer.getSuccessCount();
+            totalConsumedLocal += consumer.getSuccessCount();
         }
+        System.out.println("Total consumed (local): " + totalConsumedLocal);
 
-        System.out.println("Total consumed: " + totalConsumed);
+        eventMetrics.printMetrics(); // 打印 EventMetrics 中的统计数据
+        System.out.println("Events remaining in queue: " + eventBufferQueue.size());
 
-
-
-
-
+        config.printConfig(); // 打印最终配置状态
     }
 }

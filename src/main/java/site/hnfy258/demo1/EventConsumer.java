@@ -1,14 +1,23 @@
 package site.hnfy258.demo1;
 
+import site.hnfy258.demo2.DynamicProcessingConfig;
+import site.hnfy258.demo2.EventMetrics;
+
 import java.util.concurrent.TimeUnit;
 
 public class EventConsumer implements Runnable{
-    private long successCount = 0; // 建议改为 long 类型
+    private long successCount = 0;
+    private final EventBufferQueue queue;
+    private final EventMetrics metrics;
+    private final DynamicProcessingConfig config;
 
-    public EventConsumer(EventBufferQueue queue){
+    public EventConsumer(EventBufferQueue queue, EventMetrics eventMetrics, DynamicProcessingConfig config){
         this.queue =  queue;
+        this.metrics = eventMetrics;
+        this.config = config;
     }
-    private EventBufferQueue queue;
+
+
     @Override
     public void run() {
         String threadName = Thread.currentThread().getName();
@@ -17,13 +26,16 @@ public class EventConsumer implements Runnable{
         while(true){
             Event event = null;
             try {
-                // 使用带超时的 pollEvent 方法。
-                // 如果队列为空，会等待直到超时或者有新事件。
-                event = queue.pollEvent(500, TimeUnit.MILLISECONDS); // 等待 500ms
-
+                if(!config.isProcessingEnabled()){
+                    Thread.sleep(10);
+                    continue;
+                }
+                event = queue.pollEvent(500, TimeUnit.MILLISECONDS);
                 if (event != null) {
                     successCount++;
-                    Thread.sleep(50); // 模拟处理延迟
+                    metrics.incrementProcessedCount();
+                    metrics.incrementEventCategoryCount(event.type());
+                    Thread.sleep(50);
                 } else {
                     // 检查生产是否已完成且队列为空
                     if (queue.isProductionComplete() && queue.isEmpty()) {
@@ -38,6 +50,7 @@ public class EventConsumer implements Runnable{
                 break;
             }catch (Exception e){
                 System.err.println(threadName + " encountered an unexpected error: " + e.getMessage());
+                metrics.incrementErrorCount();
                 e.printStackTrace();
             }
         }
