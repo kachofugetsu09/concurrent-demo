@@ -2,6 +2,7 @@ package site.hnfy258.demo3;
 
 import site.hnfy258.demo1.Event;
 import site.hnfy258.demo3.exception.*; // 导入你的自定义异常包
+import site.hnfy258.demo4.ConcurrentBlocklist;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -11,13 +12,22 @@ import java.util.concurrent.CompletionException; // 用于处理 CompletableFutu
 
 public class EventProcessorService {
     private final MockExternalService mockExternalService;
+    private final ConcurrentBlocklist blackList;
 
-    public EventProcessorService(MockExternalService mockExternalService) {
+    public EventProcessorService(MockExternalService mockExternalService,
+                                 ConcurrentBlocklist blackList) {
         this.mockExternalService = mockExternalService;
+        this.blackList = blackList;
+
     }
 
     public CompletableFuture<ProcessingResult> processEvent(Event event) {
         System.out.println("Processor: Starting processing for event: " + event.traceId());
+        if(blackList.contains(event.traceId())){
+            System.out.println("Processor: Event " + event.traceId() + " is in the blacklist. Skipping processing.");
+            return CompletableFuture.completedFuture(
+                    new ProcessingResult(event, false, "Event is blacklisted", Collections.emptyMap()));
+        }
 
         return mockExternalService.validateEvent(event)
                 .thenCompose(isValid -> {
